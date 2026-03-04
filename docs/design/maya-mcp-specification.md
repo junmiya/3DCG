@@ -159,15 +159,53 @@ maya-mcp/
 6. MCP Server → AI Client へ結果を返却
 ```
 
-### 8.2 コマンド送信形式
+### 8.2 デュアルコネクションパターン
+
+Maya の commandPort では、複数行の Python コードを送信した際に戻り値を直接取得できない制約がある。
+既存実装（PatrickPalmer/MayaMCP 等）で実績のある**デュアルコネクションパターン**を採用する。
+
+```
+接続1（コマンド送信用）: コードを実行し、結果をグローバル変数に格納
+接続2（結果取得用）:     格納された結果を読み取り
+```
 
 ```python
-# MCP Server から Maya への送信例
+# 接続1: コマンド実行（結果をグローバル変数に格納）
+code = '''
+import maya.cmds as cmds
+import json
+_mcp_result = json.dumps(cmds.ls(type="mesh"))
+'''
+conn1.send(code.encode() + b'\n')
+
+# 接続2: 結果取得
+conn2.send(b'_mcp_result\n')
+result = conn2.recv(4096).decode()
+```
+
+#### 名前空間の隔離
+
+Maya のグローバル名前空間を汚染しないよう、MCP 関連の変数・関数はすべて `_mcp_` プレフィックスを付与する。
+
+```python
+# スコープ関数でラップして実行
+def _mcp_exec():
+    import maya.cmds as cmds
+    return cmds.ls(type="mesh")
+_mcp_result = _mcp_exec()
+del _mcp_exec
+```
+
+### 8.3 コマンド送信形式
+
+```python
+# MCP Server から Maya への送信例（単純なコマンド）
 socket.send(b'import maya.cmds as cmds; cmds.ls(type="mesh")\n')
 ```
 
 - 末尾に `\n`（改行）を付与して送信完了を通知
 - 戻り値は文字列として受信
+- 複雑なコマンドはデュアルコネクションパターンを使用
 
 ### 8.3 エラーハンドリング
 
@@ -226,7 +264,16 @@ socket.send(b'import maya.cmds as cmds; cmds.ls(type="mesh")\n')
 - エラーハンドリングの強化
 - テストの充実
 
-## 12. 今後の拡張候補
+## 12. 既存実装の参考プロジェクト
+
+| プロジェクト | 特徴 |
+|---|---|
+| [PatrickPalmer/MayaMCP](https://github.com/PatrickPalmer/MayaMCP) | デュアルコネクション方式、Maya プラグイン不要、名前空間隔離 |
+| [Jeffreytsai1004/maya-mcp](https://github.com/Jeffreytsai1004/maya-mcp) | 29 ツール、ポート 7022 使用、ホットリロード対応 |
+| [AYDJI/Autodesk-Maya-MCP](https://github.com/AYDJI/Autodesk-Maya-MCP) | 30+ ツール、プロダクション向け |
+| [lightfastai/lightfast-mcp](https://github.com/lightfastai/lightfast-mcp) | Blender/Maya/TouchDesigner 統合アーキテクチャ |
+
+## 13. 今後の拡張候補
 
 - **Viewport キャプチャ**: Maya のビューポート画像を取得し AI に視覚的フィードバック
 - **ノードエディタ操作**: シェーディングネットワーク等のノード操作
