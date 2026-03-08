@@ -12,13 +12,21 @@ Usage in Maya:
     from maya_mcp_bridge import start_mcp_bridge, stop_mcp_bridge
     start_mcp_bridge(port=7001)
     stop_mcp_bridge()
+
+    # Open UI panel:
+    from maya_mcp_bridge import open_panel
+    open_panel()
 """
+
+import sys
+from pathlib import Path
 
 import maya.cmds as cmds
 import maya.api.OpenMaya as om
 
 PLUGIN_NAME = "maya_mcp_bridge"
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.0"
+MENU_NAME = "mayaMCPMenu"
 DEFAULT_PORT = 7001
 
 _active_port = None
@@ -71,12 +79,43 @@ def stop_mcp_bridge() -> None:
         _active_port = None
 
 
+def open_panel(*args) -> None:
+    """Open the Maya MCP UI panel."""
+    # Ensure maya_plugin directory is in sys.path for ui package imports
+    plugin_dir = str(Path(__file__).resolve().parent)
+    if plugin_dir not in sys.path:
+        sys.path.insert(0, plugin_dir)
+
+    from ui.panel import MayaMCPPanel
+    MayaMCPPanel.display()
+
+
+def _create_menu() -> None:
+    """Create the Maya MCP menu in the main menu bar."""
+    if cmds.menu(MENU_NAME, exists=True):
+        cmds.deleteUI(MENU_NAME)
+
+    cmds.menu(MENU_NAME, label="Maya MCP", parent="MayaWindow", tearOff=True)
+    cmds.menuItem(label="Open Panel", command=open_panel)
+    cmds.menuItem(divider=True)
+    cmds.menuItem(label="Start Bridge", command=lambda _: start_mcp_bridge())
+    cmds.menuItem(label="Stop Bridge", command=lambda _: stop_mcp_bridge())
+
+
+def _remove_menu() -> None:
+    """Remove the Maya MCP menu."""
+    if cmds.menu(MENU_NAME, exists=True):
+        cmds.deleteUI(MENU_NAME)
+
+
 def initializePlugin(plugin: om.MObject) -> None:
     """Called when the plugin is loaded in Maya."""
     om.MFnPlugin(plugin, "Maya MCP", PLUGIN_VERSION)
     start_mcp_bridge()
+    _create_menu()
 
 
 def uninitializePlugin(plugin: om.MObject) -> None:
     """Called when the plugin is unloaded from Maya."""
+    _remove_menu()
     stop_mcp_bridge()
