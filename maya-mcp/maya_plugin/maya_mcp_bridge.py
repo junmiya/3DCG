@@ -1,21 +1,15 @@
 """Maya plugin to open commandPort for MCP Server communication.
 
 Usage in Maya:
-    # Load the plugin
+    # 推奨: プラグインとしてロード
     import maya.cmds as cmds
     cmds.loadPlugin("/path/to/maya_mcp_bridge.py")
 
-    # Or run directly in Maya's Script Editor:
-    exec(open("/path/to/maya_mcp_bridge.py").read())
-
-    # Manual start/stop:
-    from maya_mcp_bridge import start_mcp_bridge, stop_mcp_bridge
+    # 手動操作:
+    from maya_mcp_bridge import start_mcp_bridge, stop_mcp_bridge, open_panel
     start_mcp_bridge(port=7001)
-    stop_mcp_bridge()
-
-    # Open UI panel:
-    from maya_mcp_bridge import open_panel
     open_panel()
+    stop_mcp_bridge()
 """
 
 import sys
@@ -25,9 +19,19 @@ import maya.cmds as cmds
 import maya.api.OpenMaya as om
 
 PLUGIN_NAME = "maya_mcp_bridge"
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.2.1"
 MENU_NAME = "mayaMCPMenu"
 DEFAULT_PORT = 7001
+
+# --- プラグインディレクトリを一元解決 ---------------------------------------
+# __file__ が定義されていないケース（execで読み込まれた場合など）にも対応
+try:
+    _PLUGIN_DIR = Path(__file__).resolve().parent
+except NameError:
+    # フォールバック: 既知の絶対パス
+    _PLUGIN_DIR = Path(
+        "/Users/muli/Documents/AI/3DCG/maya-mcp/maya_plugin"
+    ).resolve()
 
 _active_port = None
 
@@ -37,15 +41,28 @@ def maya_useNewAPI():
     pass
 
 
+def _ensure_plugin_dir_on_syspath() -> None:
+    """Insert plugin directory into sys.path if missing."""
+    plugin_dir = str(_PLUGIN_DIR)
+    if plugin_dir not in sys.path:
+        sys.path.insert(0, plugin_dir)
+
+
 def start_mcp_bridge(port: int = DEFAULT_PORT) -> None:
     """Open Maya commandPort for MCP Server connections."""
     global _active_port
 
     port_name = f":{port}"
 
-    # Close existing port if open
+    # 既存ポートがあれば閉じる
     if _active_port is not None:
         stop_mcp_bridge()
+
+    # 同じポートが残っていた場合に備えて、事前に close を試みる（失敗は無視）
+    try:
+        cmds.commandPort(name=port_name, close=True)
+    except RuntimeError:
+        pass
 
     try:
         cmds.commandPort(name=port_name, sourceType="python", echoOutput=True)
@@ -81,10 +98,7 @@ def stop_mcp_bridge() -> None:
 
 def open_panel(*args) -> None:
     """Open the Maya MCP UI panel."""
-    # Ensure maya_plugin directory is in sys.path for ui package imports
-    plugin_dir = str(Path(__file__).resolve().parent)
-    if plugin_dir not in sys.path:
-        sys.path.insert(0, plugin_dir)
+    _ensure_plugin_dir_on_syspath()
 
     from ui.panel import MayaMCPPanel
     MayaMCPPanel.display()
@@ -111,8 +125,14 @@ def _remove_menu() -> None:
 def initializePlugin(plugin: om.MObject) -> None:
     """Called when the plugin is loaded in Maya."""
     om.MFnPlugin(plugin, "Maya MCP", PLUGIN_VERSION)
+
+    # sys.path を即座に通しておく（他のコマンドから import できるように）
+    _ensure_plugin_dir_on_syspath()
+
     start_mcp_bridge()
-    _create_menu()
+
+    # MayaWindow が未生成のタイミングで呼ばれる場合に備えて遅延実行
+    cmds.evalDeferred(_create_menu)
 
 
 def uninitializePlugin(plugin: om.MObject) -> None:
