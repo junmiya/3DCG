@@ -4,3 +4,7 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+.venv/
+__pycache__/
+*.pyc
+*.bak
